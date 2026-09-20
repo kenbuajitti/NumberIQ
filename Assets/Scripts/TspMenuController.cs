@@ -2,6 +2,10 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.EventSystems;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem.UI;
+#endif
 
 public class TspMenuController : MonoBehaviour
 {
@@ -9,12 +13,20 @@ public class TspMenuController : MonoBehaviour
 
     void Awake()
     {
+        EnsureMenuInput();
         Transform menuCanvas = null;
         foreach (GameObject root in gameObject.scene.GetRootGameObjects())
             foreach (Canvas canvas in root.GetComponentsInChildren<Canvas>(true))
                 if (canvas.name == "MenuCanvas") menuCanvas = canvas.transform;
         if (menuCanvas != null)
         {
+            Canvas canvas = menuCanvas.GetComponent<Canvas>();
+            canvas.enabled = true;
+            GraphicRaycaster raycaster = menuCanvas.GetComponent<GraphicRaycaster>();
+            if (raycaster == null) raycaster = menuCanvas.gameObject.AddComponent<GraphicRaycaster>();
+            raycaster.enabled = true;
+            foreach (TMP_Text label in menuCanvas.GetComponentsInChildren<TMP_Text>(true))
+                label.raycastTarget = false;
             Transform panel = menuCanvas.Find("HowToPlayPanel");
             if (panel != null) howToPlayPanel = panel.gameObject;
             Bind(menuCanvas.Find("PlayGameButton"), PlayGame);
@@ -32,10 +44,10 @@ public class TspMenuController : MonoBehaviour
         TMP_Text titleText = title.GetComponent<TMP_Text>();
         if (titleText == null) return;
 
-        const string letters = "WORDGAME";
-        for (int i = 0; i < letters.Length; i++)
+        string[] numbers = { "4", "7", "14", "28", "31", "8", "16", "32" };
+        for (int i = 0; i < numbers.Length; i++)
         {
-            var tile = new GameObject("LetterTile" + i, typeof(RectTransform), typeof(Image));
+            var tile = new GameObject("NumberTile" + i, typeof(RectTransform), typeof(Image));
             tile.transform.SetParent(background, false);
             var rect = tile.GetComponent<RectTransform>();
             Vector2 anchor = new Vector2(i < 4 ? .09f : .91f, .16f + (i % 4) * .22f);
@@ -46,20 +58,47 @@ public class TspMenuController : MonoBehaviour
             tileImage.color = new Color(.3f, .65f, .72f, .07f);
             tileImage.raycastTarget = false;
 
-            var label = new GameObject("Letter", typeof(RectTransform), typeof(TextMeshProUGUI));
+            var label = new GameObject("Number", typeof(RectTransform), typeof(TextMeshProUGUI));
             label.transform.SetParent(tile.transform, false);
             var text = label.GetComponent<TextMeshProUGUI>();
             text.rectTransform.anchorMin = Vector2.zero;
             text.rectTransform.anchorMax = Vector2.one;
             text.rectTransform.offsetMin = text.rectTransform.offsetMax = Vector2.zero;
             text.font = titleText.font;
-            text.text = letters[i].ToString();
+            text.text = numbers[i];
             text.fontSize = 40;
             text.fontStyle = FontStyles.Bold;
             text.alignment = TextAlignmentOptions.Center;
             text.color = new Color(.5f, .85f, .9f, .16f);
             text.raycastTarget = false;
         }
+    }
+
+    // Repair missing UI actions in copied projects, using the enabled input backend.
+    static void EnsureMenuInput()
+    {
+        EventSystem events = EventSystem.current;
+        if (events == null)
+            events = Object.FindFirstObjectByType<EventSystem>();
+        if (events == null)
+            events = new GameObject("EventSystem", typeof(EventSystem)).GetComponent<EventSystem>();
+        events.enabled = true;
+#if ENABLE_INPUT_SYSTEM
+        InputSystemUIInputModule input = events.GetComponent<InputSystemUIInputModule>();
+        if (input == null) input = events.gameObject.AddComponent<InputSystemUIInputModule>();
+        foreach (BaseInputModule other in events.GetComponents<BaseInputModule>())
+            if (other != input) other.enabled = false;
+        input.enabled = true;
+        if (input.actionsAsset == null || input.point == null || input.point.action == null ||
+            input.leftClick == null || input.leftClick.action == null)
+            input.AssignDefaultActions();
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        StandaloneInputModule input = events.GetComponent<StandaloneInputModule>();
+        if (input == null) input = events.gameObject.AddComponent<StandaloneInputModule>();
+        foreach (BaseInputModule other in events.GetComponents<BaseInputModule>())
+            if (other != input) other.enabled = false;
+        input.enabled = true;
+#endif
     }
 
     static void Bind(Transform target, UnityEngine.Events.UnityAction action)
@@ -76,13 +115,21 @@ public class TspMenuController : MonoBehaviour
 
     public void PlayGame()
     {
+        if (!Application.CanStreamedLevelBeLoaded("TspGameScene"))
+        {
+            Debug.LogError("NumberIQ: add Assets/Scenes/TspGameScene.unity to the active Build Profile Scene List.", this);
+            return;
+        }
         SceneManager.LoadScene("TspGameScene");
     }
 
     public void ShowHowToPlay()
     {
         if (howToPlayPanel != null)
+        {
+            howToPlayPanel.transform.SetAsLastSibling();
             howToPlayPanel.SetActive(true);
+        }
     }
 
     public void CloseHowToPlay()
